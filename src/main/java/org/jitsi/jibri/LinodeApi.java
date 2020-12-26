@@ -1,7 +1,12 @@
 package org.jitsi.jibri;
 
-import java.util.Random;
+
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
 import java.util.logging.Logger;
+import java.util.Random;
+import java.lang.Runnable;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -19,6 +24,41 @@ public class LinodeApi {
     private final String IF_CONFIG_ME_ADDRESS = "http://ifconfig.me/";
     private final String LINODE_INSTANCES_ENDPOINT = "https://api.linode.com/v4/linode/instances";
     private final String LINODE_IMAGES_ENDPOINT = "https://api.linode.com/v4/images";
+    private ScheduledExecutorService rebootScheduler = Executors.newScheduledThreadPool(1);
+    private final int WAIT_TO_CLONE_TIME = 10;
+    private final int REBOOT_REQUEST_INTERVAL = 5;
+
+    private void rebootLinodeInstance(int id, String personalAccessToken){
+	Runnable r = new Runnable() {
+			private boolean isBooted = false;
+			@Override
+			public void run() {
+				if(isBooted)
+					return;
+				OkHttpClient client = new OkHttpClient();
+				MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+				RequestBody body = RequestBody.create(null, new byte[0]);
+				String rebootUrl = LINODE_INSTANCES_ENDPOINT + "/" + id + "/reboot";
+				Request request = new Request.Builder().url(rebootUrl)
+					.header("Authorization", "Bearer " + personalAccessToken).post(body).build();
+				try {
+					Response response = client.newCall(request).execute();
+					JSONObject json = new JSONObject(response.body().string());
+					boolean isThereErrors = json.has("errors");
+					if(isThereErrors)
+						logger.info("reboot result of new Linode instance with id: " + id + " ---> " + json.getString("errors"));
+					else{
+						logger.info("reboot result of new Linode instance with id: " + id + " ---> " + json.toString());
+						logger.info("seems new Linode instance is rebooted successfully, stopped sending new reboot requests.");
+						isBooted = true;
+					}
+				} catch (Exception e) {
+				    e.printStackTrace();
+				}
+			}
+		};
+	rebootScheduler.scheduleAtFixedRate(r, WAIT_TO_CLONE_TIME, REBOOT_REQUEST_INTERVAL, TimeUnit.SECONDS);
+    }
 
     public int findCurrentLinodeId(String personalAccessToken){
         OkHttpClient client = new OkHttpClient();
@@ -58,6 +98,7 @@ public class LinodeApi {
         return -1;
     }
 
+    // TODO remove it, unused
     private String getRandPassword(int n) {
         String characterSet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
         Random random = new Random(System.nanoTime());
@@ -69,6 +110,7 @@ public class LinodeApi {
         return password.toString();
     }
 
+    // TODO remove it, unused
     private String findUbuntuJibriImageId(String personalAccessToken){
         OkHttpClient client = new OkHttpClient();
         Request request = new Request.Builder().url(LINODE_IMAGES_ENDPOINT)
@@ -90,25 +132,21 @@ public class LinodeApi {
 
     public int createNode(String personalAccessToken) {
         logger.info("your Linode personal access token: " + personalAccessToken);
-        String rootPass = getRandPassword(100);
-        String ubuntuJibriImageId = findUbuntuJibriImageId(personalAccessToken);
-        if(ubuntuJibriImageId == null){
-            logger.info("can't find ubuntu-jibri image id. cancelling new Linode creation request."); // TODO use logger.error
-            return -1;
-        }
+	int currentLinodeId = findCurrentLinodeId(personalAccessToken);
         OkHttpClient client = new OkHttpClient();
         MediaType JSON = MediaType.parse("application/json; charset=utf-8");
-        String payload = "{\"type\":\"g6-standard-4\",\"region\":\"us-east\",\"backups_enabled\":false,\"root_pass\":\"" + rootPass
-                + "\",\"booted\":true,\"image\":\"" + ubuntuJibriImageId  + "\"}";
+        String payload = "{\"type\":\"g6-standard-4\",\"region\":\"us-east\",\"backups_enabled\":false}";
+	String cloneUrl = LINODE_INSTANCES_ENDPOINT + "/" + currentLinodeId + "/clone";
         RequestBody body = RequestBody.create(JSON, payload);
-        Request request = new Request.Builder().url(LINODE_INSTANCES_ENDPOINT)
+        Request request = new Request.Builder().url(cloneUrl)
                 .header("Authorization", "Bearer " + personalAccessToken).post(body).build();
         try {
             Response response = client.newCall(request).execute();
             JSONObject json = new JSONObject(response.body().string());
             logger.info(json.toString());
             int newLinodeId = json.getInt("id");
-            logger.info("created new Linode instance with root password as: " + rootPass);
+            logger.info("created new Linode instance with id: " + newLinodeId);
+	    rebootLinodeInstance(newLinodeId, personalAccessToken);
             return newLinodeId;
         } catch (Exception e) {
             e.printStackTrace();

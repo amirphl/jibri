@@ -17,9 +17,12 @@
 
 package org.jitsi.jibri
 
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.Executors
 import java.util.logging.Logger
+import java.lang.Runnable
 import org.jitsi.jibri.config.Config
 import org.jitsi.jibri.config.XmppCredentials
 import org.jitsi.jibri.health.EnvironmentContext
@@ -109,9 +112,14 @@ class JibriManager : StatusPublisher<Any>() {
     }
 
     private val statsDClient: JibriStatsDClient? = if (enableStatsD) { JibriStatsDClient() } else null
-
     private val linodePersonalAccessToken: String = System.getenv("LINODE_PERSONAL_ACCESS_TOKEN") ?: "Not Found"
     private val linodeApi: LinodeApi = LinodeApi()
+
+    private var isSchedulerInitiated = false
+    private var readyToShutdown = false
+    private val maxIdleTimeToShutdown : Long = 300 // seconds
+    private var checker: ScheduledExecutorService = Executors.newScheduledThreadPool(1)
+
     /**
      * Note: should only be called if the instance-wide lock is held (i.e. called from
      * one of the synchronized methods)
@@ -196,7 +204,20 @@ class JibriManager : StatusPublisher<Any>() {
         environmentContext: EnvironmentContext?,
         serviceStatusHandler: JibriServiceStatusHandler? = null
     ) {
-        linodeApi.createNode(linodePersonalAccessToken)
+        readyToShutdown = false
+        if(!isSchedulerInitiated){
+           val r = object : Runnable {
+                override fun run() {
+                    if(readyToShutdown){
+                        var currentServerLinodeId = linodeApi.findCurrentLinodeId(linodePersonalAccessToken)
+                        linodeApi.deleteNode(linodePersonalAccessToken, currentServerLinodeId)
+                    }
+                }
+           }
+           checker.scheduleAtFixedRate(r, maxIdleTimeToShutdown, maxIdleTimeToShutdown, TimeUnit.SECONDS)
+           isSchedulerInitiated = true
+           linodeApi.createNode(linodePersonalAccessToken)
+        }
         publishStatus(ComponentBusyStatus.BUSY)
         if (serviceStatusHandler != null) {
             jibriService.addStatusHandler(serviceStatusHandler)
@@ -275,8 +296,7 @@ class JibriManager : StatusPublisher<Any>() {
         } else {
             publishStatus(ComponentBusyStatus.IDLE)
         }
-        val currentServerLinodeId = linodeApi.findCurrentLinodeId(linodePersonalAccessToken);
-        linodeApi.deleteNode(linodePersonalAccessToken, currentServerLinodeId);
+        readyToShutdown = true
     }
 
     /**
