@@ -141,6 +141,10 @@ fun main(args: Array<String>) {
             .convertFrom<List<com.typesafe.config.Config>> { envConfigs -> envConfigs.map { it.toXmppEnvironment() } }
     }.get()
 
+
+    xmppEnvironments.get(0).controlMuc.nickname = getRandomString(100)
+    logger.info("--------------  $xmppEnvironments")
+
     // XmppApi
     val xmppApi = XmppApi(
         jibriManager = jibriManager,
@@ -227,4 +231,11 @@ private fun setupMetaconfigLogger() {
             configLogger.warning(block)
         }
     }
+}
+
+fun getRandomString(length: Int) : String {
+    val allowedChars = ('A'..'Z') + ('a'..'z') + ('0'..'9')
+    return (1..length)
+        .map { allowedChars.random() }
+        .joinToString("")
 }

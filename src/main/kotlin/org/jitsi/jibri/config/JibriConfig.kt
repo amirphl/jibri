@@ -45,7 +45,7 @@ data class XmppMuc(
     val domain: String,
     @JsonProperty("room_name")
     val roomName: String,
-    val nickname: String
+    var nickname: String
 )
 
 fun com.typesafe.config.Config.toXmppMuc(): XmppMuc =
