@@ -2,6 +2,8 @@ create a new Linode instance (4 cores, 8GB ram) with ubuntu16.04 as the base ima
 
 wait for the Linode instance to become ready.  
 
+shutdown the Linode instance, resize it to 6GB (TODO what is the best value?), then reboot it.  
+
 clone the project in the Linode instance: `git clone https://github.com/amirphl/jibri.git`  
 
 run: `git checkout feature/create-linode-when-new-request`  
